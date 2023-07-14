@@ -1,0 +1,71 @@
+# Copyright 2020 Jonathan Jenkyn
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'POC for meeting transcription service using GPT'
+Parameters:
+  OpenAIKey:
+    Type: String
+    Description: Go here to get your key https://platform.openai.com/account/api-keys
+Resources:
+    CollectRecording:
+        Type: AWS::Serverless::Function
+        Properties:
+            Description: ""
+            Handler: "index.lambda_handler"
+            CodeUri: src/collect-recording/
+            Policies:
+              - "arn:aws:iam::aws:policy/AmazonTranscribeFullAccess"
+              - "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+              - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+            Runtime: "python3.8"
+            Timeout: 10
+            Events:
+              CollectRecordingEvent:
+                Type: S3
+                Properties:
+                  Bucket: !Ref S3Bucket
+                  Events: s3:ObjectCreated:*
+                  Filter: 
+                    S3Key: 
+                        Rules: 
+                          - 
+                            Name: "Suffix"
+                            Value: ".mp4"
+
+    DeliverResult:
+        Type: AWS::Serverless::Function
+        Properties:
+            Description: ""
+            Handler: "index.lambda_handler"
+            CodeUri: src/deliver-result/
+            Policies:
+              - "arn:aws:iam::aws:policy/AmazonTranscribeFullAccess"
+              - "arn:aws:iam::aws:policy/AmazonSNSFullAccess"
+              - "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+              - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+            Runtime: "python3.8"
+            Timeout: 300
+            Environment:
+              Variables:
+                SNSTopic: !Ref SNSTopic
+                OpenAIKey: !Ref OpenAIKey
+            Events:
+              CollectRecordingEvent:
+                Type: S3
+                Properties:
+                  Bucket: !Ref S3Bucket
+                  Events: s3:ObjectCreated:*
+                  Filter: 
+                    S3Key: 
+                        Rules: 
+                          - 
+                            Name: "Suffix"
+                            Value: ".json"
+
+    SNSTopic:
+        Type: "AWS::SNS::Topic"
+
+    S3Bucket:
+        Type: "AWS::S3::Bucket"
+
+
