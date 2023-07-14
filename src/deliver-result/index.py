@@ -237,7 +237,7 @@ def lambda_handler(event, context):
     transcript_job_result = json.loads(s3_object['Body'].read())
 
     logging.debug("Converting transcript into a dataframe")
-    df = tscribe.decode_transcript_to_dataframe(transcript_job_result)
+    df = decode_transcript_to_dataframe(transcript_job_result)
         
     logging.debug("Converting dataframe into a string/transcript")
     full_transcript = df.to_string(header=True, index=False, columns=["speaker","comment"])
