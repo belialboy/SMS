@@ -216,7 +216,75 @@ def create_transcript(input: str, max_tokens, start_row=0):
 
     logging.debug("OUT create_transcript")
     return {'prompt':prompt,'count':count,'total':len(lines)}
-    
+
+def get_gpt(prompt, full_transcript, ext_prompt="", concat=False):   
+
+    logging.info("Setting GPT model")
+    model="gpt-3.5-turbo"
+
+    try:
+
+        logging.info("Creating a tokenised transcript")
+        response = create_transcript(full_transcript,4097 - len(prompt.split(" ")))
+        summary=""
+        if response['count']==response['total']:
+            logging.info("Transcript fits into a single API call. Sending it now.")
+            chat_completion = openai.ChatCompletion.create(
+                model=model, 
+                messages=[{"role": "user", "content": prompt+full_transcript}]
+                )
+            logging.info(chat_completion)
+            summary = chat_completion.choices[0].message.content
+        elif not concat:
+            logging.info("Transcript DOES NOT fit into a single API call. Sending the first part.")
+            chat_completion = openai.ChatCompletion.create(
+                model=model, 
+                messages=[{"role": "user", "content": prompt+response['prompt']}]
+                )
+            logging.info(chat_completion)
+            num_prompts = 1
+            while response['count']<response['total'] and num_prompts <4:
+                num_prompts+=1
+                context = chat_completion.choices[0].message.content
+                logging.info("Creating chunk number {}".format(num_prompts))
+                response = create_transcript(full_transcript,4097 - len(ext_prompt.split(" ")) - len(context.split(" ")),start_row=response['count'])
+                logging.info("Sending off this chunk to GPT")
+                chat_completion = openai.ChatCompletion.create(
+                    model=model, 
+                    messages=[{"role": "user", "content": ext_prompt+context+'\n'+response['prompt']}]
+                    )
+                logging.info(chat_completion)
+   
+            summary = chat_completion.choices[0].message.content  
+        elif concat:
+            logging.info("Transcript DOES NOT fit into a single API call. Sending the first part.")
+            chat_completion = openai.ChatCompletion.create(
+                model=model, 
+                messages=[{"role": "user", "content": prompt+response['prompt']}]
+                )
+            logging.info(chat_completion)
+            summary= chat_completion.choices[0].message.content
+            num_prompts = 1
+            while response['count']<response['total'] and num_prompts <4:
+                num_prompts+=1
+                logging.info("Creating chunk number {}".format(num_prompts))
+                response = create_transcript(full_transcript,4097 - len(prompt.split(" ")),start_row=response['count'])
+                logging.info("Sending off this chunk to GPT")
+                chat_completion = openai.ChatCompletion.create(
+                    model=model, 
+                    messages=[{"role": "user", "content": prompt+response['prompt']}]
+                    )
+                summary+= "\n"+chat_completion.choices[0].message.content
+                logging.info(chat_completion)
+            chat_completion = openai.ChatCompletion.create(
+                model=model, 
+                messages=[{"role": "user", "content": ext_prompt+summary}]
+                )
+            summary=chat_completion.choices[0].message.content
+    except Exception as e:
+        logging.error(e)
+
+    return summary
 
 def lambda_handler(event, context):
     logging.info("Underpants!")
@@ -242,57 +310,20 @@ def lambda_handler(event, context):
     logging.debug("Converting dataframe into a string/transcript")
     full_transcript = df.to_string(header=True, index=False, columns=["speaker","comment"])
 
-    prompt = "Summerize this meeting transcript into a list of talking points and actions for me to distribute to attendees: "
+    summary=get_gpt("Summerize this meeting transcript that I can send to the attendees:\n", full_transcript, ext_prompt="Summerize this meeting summary and the following meeting transcript that I can send to the attendees:\n")
+ 
+    actions=get_gpt("Gather actions from this meeting transcript:\n", full_transcript, ext_prompt="Reduce this list of meeting actions down to a list of no more than 7 actions:\n", concat=True)
 
-    ext_prompt = "Knowing the earlier summary, add additional talking points and actions to the summary below, based on this meeting transcript that follows: "
-
-    logging.info("Setting GPT model")
-    model="gpt-3.5-turbo"
-
-    try:
-
-        logging.info("Creating a tokenised transcript")
-        response = create_transcript(full_transcript,4097 - len(prompt.split(" ")))
-
-        if response['count']==response['total']:
-            logging.info("Transcript fits into a single API call. Sending it now.")
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": prompt+full_transcript}]
-                )
-            logging.info(chat_completion)
-            summary = chat_completion.choices[0].message.content
-        else:
-            logging.info("Transcript DOES NOT fit into a single API call. Sending the first part.")
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": prompt+response['prompt']}]
-                )
-            num_prompts = 0
-            while response['count']<response['total'] and num_prompts <3:
-                num_prompts+=1
-                context = chat_completion.choices[0].message.content
-                logging.info("Creating chunk number "+(num_prompts+1))
-                response = create_transcript(full_transcript,4097 - len(ext_prompt.split(" ")) - len(context.split(" ")),start_row=response['count'])
-                logging.info("Sending off this chunk to GPT")
-                chat_completion = openai.ChatCompletion.create(
-                    model=model, 
-                    messages=[{"role": "user", "content": ext_prompt+context+'\n'+response['prompt']}]
-                    )
-                logging.info(chat_completion)
-            logging.info("Done with that, ready to send the summary to SNS")    
-            summary = chat_completion.choices[0].message.content
+    title=get_gpt("Create a short and punchy meeting title from this meeting summary:\n", summary)
      
-        # print the chat completion
-        logging.info(summary)
+    # print the chat completion
+    logging.info(summary)
 
-        logging.info("Send the summary to the SNS topic")
-        sns.publish(
-            TopicArn=os.environ['SNSTopic'],
-            Message=summary,
-            Subject="Meeting Transcript")
-    except Exception as e:
-        logging.error(e)
+    logging.info("Send the summary to the SNS topic")
+    sns.publish(
+        TopicArn=os.environ['SNSTopic'],
+        Message="SUMMARY\n-------\n{summary}\nACTIONS\n-------\n{actions}".format(summary=summary,actions=actions),
+        Subject=title)
     
     logging.info("Profit!")
 
