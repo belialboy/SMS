@@ -310,9 +310,15 @@ def lambda_handler(event, context):
     logging.debug("Converting dataframe into a string/transcript")
     full_transcript = df.to_string(header=True, index=False, columns=["speaker","comment"])
 
-    summary=get_gpt("Summerize this meeting transcript that I can send to the attendees:\n", full_transcript, ext_prompt="Summerize this meeting summary and the following meeting transcript that I can send to the attendees:\n")
+    summary=get_gpt("Imagine you are an assistant that listened to the meeting transcript below. Your task is to create an executive summary about the meeting. The executive summary should include the most important information of the meeting:\n", 
+        full_transcript, 
+        ext_prompt="Imagine you are an assistant that has gathered the following meeting summaries about the same meeting. Your task is to create an executive summary about the meeting. The executive summary should include the most important information of the meeting:\n", 
+        concat=True)
  
-    actions=get_gpt("Gather actions from this meeting transcript:\n", full_transcript, ext_prompt="Reduce this list of meeting actions down to a list of no more than 7 actions:\n", concat=True)
+    actions=get_gpt("Imagine you are an assistant that listened to the meeting transcript below. Your task is to identify to-dos that were discussed in this meeting. Only include to-dos that have been assigned to a person. If there are no specific to-dos, don't return any:\n", 
+        full_transcript, 
+        ext_prompt="Imagine you are an assistant that has captured a list of actions from a meeting. Your task is to reduce this list of meeting to-dos down to a list of only the most important to-dos:\n", 
+        concat=True)
 
     title=get_gpt("Create a short and punchy meeting title from this meeting summary:\n", summary)
      
