@@ -2,10 +2,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: 'POC for meeting transcription service using GPT'
-Parameters:
-  OpenAIKey:
-    Type: String
-    Description: Go here to get your key https://platform.openai.com/account/api-keys
+
 Resources:
     CollectRecording:
         Type: AWS::Serverless::Function
@@ -15,7 +12,6 @@ Resources:
             CodeUri: src/collect-recording/
             Policies:
               - "arn:aws:iam::aws:policy/AmazonTranscribeFullAccess"
-              - "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
               - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
             Runtime: "python3.8"
             Timeout: 10
@@ -41,7 +37,6 @@ Resources:
             Policies:
               - "arn:aws:iam::aws:policy/AmazonTranscribeFullAccess"
               - "arn:aws:iam::aws:policy/AmazonSNSFullAccess"
-              - "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
               - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
               - Version: '2012-10-17' 
               Statement:
