@@ -207,7 +207,7 @@ def get_summary(transcript):
     return call_br("You are an executive assistant, and responsible for writing the meeting minutes. The minutes must include the most important information and decisions made, and a list of actions that were agreed. Where possible to derive from the transcript, you should name the speakers in your minutes. Here follows a transcript of a meeting your must write the minutes for:\n\n{TRANSCRIPT}\n\n".format(TRANSCRIPT=transcript))
 
 def get_title(summary):
-    return call_br("Please use the following meeting summary to create a meeting title with fewer than 10 words:\n\n{SUMMARY}".format(SUMMARY=summary)
+    return call_br("Please use the following meeting summary to create a meeting title with fewer than 10 words:\n\n{SUMMARY}".format(SUMMARY=summary))
 
 def lambda_handler(event, context):
     logging.info("Underpants!")
