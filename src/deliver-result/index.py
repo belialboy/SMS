@@ -1,6 +1,5 @@
 import json, datetime
 import boto3
-import openai
 import logging
 import pandas
 import os
@@ -8,7 +7,6 @@ import tscribe
 
 from urllib.parse import urlparse 
 
-openai.api_key = os.environ['OpenAIKey']
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -185,106 +183,31 @@ def decode_transcript_to_dataframe(data: str):
 
     return dataframe
 
-def count_tokens(input :str):
-    logging.debug("Counting tokens")
-    return len(input.split(" "))
+def call_br(prompt="Hello World",modelId='anthropic.claude-v2'):
 
-def create_transcript(input: str, max_tokens, start_row=0):
-    """
-        This function takes and existing string with NL characters, 
-        and delivers a new string that has at most 'max_tokens' words 
-        in it. You can offset the starting line by using `start_row`.
-    """
-    logging.debug("IN create_transcript")
-    lines = input.split('\n')
-    count = start_row
-    temp_prompt = ""
-    while count_tokens(temp_prompt) < max_tokens and count < len(lines):
-        temp_prompt += lines[count]+'\n'
-        count+=1
-    
-    if count == len(lines):
-        logging.debug("OUT create_transcript")
-        return {'prompt':temp_prompt,'count':count,'total':len(lines)}
-    
-    logging.debug("Digging deeper")
-    prompt = ""
-    final_count = start_row
-    while final_count < count:
-        prompt+=lines[final_count]+'\n'
-        final_count+=1
+    client = boto3.client("bedrock-runtime",region_name='us-east-1')
 
-    logging.debug("OUT create_transcript")
-    return {'prompt':prompt,'count':count,'total':len(lines)}
+    accept = 'application/json'
+    contentType = 'application/json'
 
-def get_gpt(prompt, full_transcript, ext_prompt="", concat=False):   
+    fixed_prompt =  "\n\nHuman:{PROMPT}\n\nAssistant:".format(PROMPT=prompt)
+    body = json.dumps({
+        "prompt": fixed_prompt,
+        "max_tokens_to_sample": 1000,
+        "temperature": 0.1,
+        "top_p": 0.9,
+    })
 
-    logging.info("Setting GPT model")
-    model="gpt-3.5-turbo"
+    response = client.invoke_model(body=body, modelId=modelId, accept=accept, contentType=contentType)
+    response_body = json.loads(response.get('body').read())
 
-    try:
+    return(response_body.get('completion'))
 
-        logging.info("Creating a tokenised transcript")
-        response = create_transcript(full_transcript,4097 - len(prompt.split(" ")))
-        summary=""
-        if response['count']==response['total']:
-            logging.info("Transcript fits into a single API call. Sending it now.")
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": prompt+full_transcript}]
-                )
-            logging.info(chat_completion)
-            summary = chat_completion.choices[0].message.content
-        elif not concat:
-            logging.info("Transcript DOES NOT fit into a single API call. Sending the first part.")
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": prompt+response['prompt']}]
-                )
-            logging.info(chat_completion)
-            num_prompts = 1
-            while response['count']<response['total'] and num_prompts <4:
-                num_prompts+=1
-                context = chat_completion.choices[0].message.content
-                logging.info("Creating chunk number {}".format(num_prompts))
-                response = create_transcript(full_transcript,4097 - len(ext_prompt.split(" ")) - len(context.split(" ")),start_row=response['count'])
-                logging.info("Sending off this chunk to GPT")
-                chat_completion = openai.ChatCompletion.create(
-                    model=model, 
-                    messages=[{"role": "user", "content": ext_prompt+context+'\n'+response['prompt']}]
-                    )
-                logging.info(chat_completion)
-   
-            summary = chat_completion.choices[0].message.content  
-        elif concat:
-            logging.info("Transcript DOES NOT fit into a single API call. Sending the first part.")
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": prompt+response['prompt']}]
-                )
-            logging.info(chat_completion)
-            summary= chat_completion.choices[0].message.content
-            num_prompts = 1
-            while response['count']<response['total'] and num_prompts <4:
-                num_prompts+=1
-                logging.info("Creating chunk number {}".format(num_prompts))
-                response = create_transcript(full_transcript,4097 - len(prompt.split(" ")),start_row=response['count'])
-                logging.info("Sending off this chunk to GPT")
-                chat_completion = openai.ChatCompletion.create(
-                    model=model, 
-                    messages=[{"role": "user", "content": prompt+response['prompt']}]
-                    )
-                summary+= "\n"+chat_completion.choices[0].message.content
-                logging.info(chat_completion)
-            chat_completion = openai.ChatCompletion.create(
-                model=model, 
-                messages=[{"role": "user", "content": ext_prompt+summary}]
-                )
-            summary=chat_completion.choices[0].message.content
-    except Exception as e:
-        logging.error(e)
+def get_summary(transcript):
+    return call_br("You are an executive assistant, and responsible for writing the meeting minutes. The minutes must include the most important information and decisions made, and a list of actions that were agreed. Where possible to derive from the transcript, you should name the speakers in your minutes. Here follows a transcript of a meeting your must write the minutes for:\n\n{TRANSCRIPT}\n\n".format(TRANSCRIPT=transcript))
 
-    return summary
+def get_title(summary):
+    return call_br("Please use the following meeting summary to create a meeting title with fewer than 10 words:\n\n{SUMMARY}".format(SUMMARY=summary)
 
 def lambda_handler(event, context):
     logging.info("Underpants!")
@@ -310,17 +233,9 @@ def lambda_handler(event, context):
     logging.debug("Converting dataframe into a string/transcript")
     full_transcript = df.to_string(header=True, index=False, columns=["speaker","comment"])
 
-    summary=get_gpt("Imagine you are an assistant that listened to the meeting transcript below. Your task is to create an executive summary about the meeting. The executive summary should include the most important information of the meeting:\n", 
-        full_transcript, 
-        ext_prompt="Imagine you are an assistant that has gathered the following meeting summaries about the same meeting. Your task is to create an executive summary about the meeting. The executive summary should include the most important information of the meeting:\n", 
-        concat=True)
- 
-    actions=get_gpt("Imagine you are an assistant that listened to the meeting transcript below. Your task is to identify to-dos that were discussed in this meeting. Only include to-dos that have been assigned to a person. If there are no specific to-dos, don't return any:\n", 
-        full_transcript, 
-        ext_prompt="Imagine you are an assistant that has captured a list of actions from a meeting. Your task is to reduce this list of meeting to-dos down to a list of only the most important to-dos:\n", 
-        concat=True)
+    summary=get_summary(full_transcript)
 
-    title=get_gpt("Create a short and punchy meeting title from this meeting summary:\n", summary)
+    title=get_title(summary)
      
     # print the chat completion
     logging.info(summary)
